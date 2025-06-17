@@ -493,12 +493,17 @@ const quizController = {
       const userId = req.user.id;
 
       logger.info(`Quiz details request for user ${userId}, quiz ${quizId}`);
-
-      // Find the quiz
-      let quiz = await cache.getQuiz(quizId);
       
-      if (!quiz) {
+      // Try to get quiz from cache first
+      let quiz = await cache.getQuiz(quizId);
+      let fromCache = !!quiz;
+      
+      // If not in cache or questions are empty, try database directly
+      if (!quiz || !Array.isArray(quiz.questions) || quiz.questions.length === 0) {
+        logger.info(`Quiz ${quizId} not found in cache or had empty questions. Fetching from database.`);
         quiz = await Quiz.findById(quizId);
+        fromCache = false;
+        
         if (!quiz) {
           return res.status(404).json({
             success: false,
@@ -507,32 +512,111 @@ const quizController = {
             }
           });
         }
+        
+        logger.info(`Quiz ${quizId} found in database with ${Array.isArray(quiz.questions) ? quiz.questions.length : 0} questions`);
+      }
+
+      // Process questions - handle case where questions is a string
+      if (typeof quiz.questions === 'string') {
+        try {
+          logger.info(`Parsing questions string for quiz ${quizId}`);
+          quiz.questions = JSON.parse(quiz.questions);
+          
+          // Handle double-encoded JSON
+          if (typeof quiz.questions === 'string') {
+            logger.info('Detected double-encoded JSON, parsing again');
+            quiz.questions = JSON.parse(quiz.questions);
+          }
+        } catch (error) {
+          logger.error(`Error parsing questions JSON: ${error.message}`);
+          // Initialize as empty array if parsing fails
+          quiz.questions = [];
+        }
+      }
+
+      // Ensure questions is an array
+      if (!Array.isArray(quiz.questions)) {
+        logger.warn(`Questions for quiz ${quizId} is not an array (type: ${typeof quiz.questions}), resetting to empty array`);
+        quiz.questions = [];
+      }
+
+      // If questions array is empty but there should be questions based on total_questions,
+      // make one more attempt with a direct database query
+      if (quiz.questions.length === 0 && quiz.total_questions > 0) {
+        logger.warn(`Quiz ${quizId} has ${quiz.total_questions} expected questions but 0 actual questions. Making final database attempt.`);
+        
+        try {
+          // Force a direct database query with no caching
+          const rawQuiz = await db.query(
+            `SELECT * FROM quizzes WHERE quiz_id = $1`, 
+            [quizId]
+          );
+          
+          if (rawQuiz.rows.length > 0 && rawQuiz.rows[0].questions) {
+            let dbQuestions;
+            try {
+              dbQuestions = JSON.parse(rawQuiz.rows[0].questions);
+              
+              // Handle double-encoded JSON
+              if (typeof dbQuestions === 'string') {
+                dbQuestions = JSON.parse(dbQuestions);
+              }
+              
+              if (Array.isArray(dbQuestions) && dbQuestions.length > 0) {
+                logger.info(`Retrieved ${dbQuestions.length} questions from direct database query`);
+                quiz.questions = dbQuestions;
+              }
+            } catch (parseError) {
+              logger.error(`Error parsing questions from direct database query: ${parseError.message}`);
+            }
+          }
+        } catch (dbError) {
+          logger.error(`Database error in final questions attempt: ${dbError.message}`);
+        }
+      }
+
+      // If we got questions from database but not from cache,
+      // update the cache with the correct data
+      if (!fromCache && Array.isArray(quiz.questions) && quiz.questions.length > 0) {
+        logger.info(`Updating cache for quiz ${quizId} with ${quiz.questions.length} questions`);
         await cache.setQuiz(quizId, quiz);
       }
 
+      // Final validation of question objects to ensure all required fields
+      logger.info(`Validating ${quiz.questions.length} questions for quiz ${quizId}`);
+      const validatedQuestions = [];
+      
+      if (Array.isArray(quiz.questions)) {
+        quiz.questions.forEach(question => {
+          // Check for minimum required fields
+          if (question && question.questionId && question.question) {
+            // Ensure options is always an array
+            const options = Array.isArray(question.options) ? question.options : [];
+            
+            validatedQuestions.push({
+              questionId: question.questionId,
+              question: question.question,
+              type: question.type || 'multiple_choice',
+              options: options,
+              marks: question.marks || 1,
+              correctAnswer: question.correctAnswer,
+              explanation: question.explanation || ''
+            });
+          } else {
+            logger.warn(`Skipping invalid question: ${JSON.stringify(question)}`);
+          }
+        });
+      }
+      
+      // Log final question count
+      logger.info(`Final validated questions count: ${validatedQuestions.length}`);
+      
       // Check if user has attempted this quiz
       const hasAttempted = await Submission.hasUserAttempted(userId, quizId);
       const lastSubmission = hasAttempted ? await Submission.getLastSubmission(userId, quizId) : null;
 
       // Get quiz statistics
-      const stats = await Quiz.getQuizStats(quizId);      // Parse questions if they're not already an object
-      if (quiz.questions && typeof quiz.questions === 'string') {
-        try {
-          quiz.questions = JSON.parse(quiz.questions);
-          logger.info(`Successfully parsed questions from string in getQuiz, found ${quiz.questions.length} questions`);
-        } catch (error) {
-          logger.error('Error parsing questions in getQuiz:', error);
-          quiz.questions = [];
-        }
-      }
-      
-      // Ensure we have an array even if the field is empty
-      if (!quiz.questions || !Array.isArray(quiz.questions)) {
-        logger.warn('Questions not found or not an array in getQuiz, using empty array');
-        quiz.questions = [];
-      }
-      
-      logger.info(`Returning quiz ${quizId} with ${quiz.questions.length} questions`);
+      const stats = await Quiz.getQuizStats(quizId);
       
       res.json({
         success: true,
@@ -546,7 +630,7 @@ const quizController = {
           difficulty: quiz.difficulty,
           createdAt: quiz.created_at,
           hasAttempted,
-          questions: quiz.questions.map(q => ({
+          questions: validatedQuestions.map(q => ({
             questionId: q.questionId,
             question: q.question,
             type: q.type,

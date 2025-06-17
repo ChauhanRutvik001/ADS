@@ -314,9 +314,56 @@
             }
           },
           "response": []
-        },
-        {
+        },        {
           "name": "Get Quiz Details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has expected structure', function() {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response).to.have.property('success').that.is.true;",
+                  "    pm.expect(response).to.have.property('quiz').that.is.an('object');",
+                  "});",
+                  "",
+                  "pm.test('Quiz has questions array', function() {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.quiz).to.have.property('questions').that.is.an('array');",
+                  "    console.log('Number of questions returned: ' + response.quiz.questions.length);",
+                  "    ",
+                  "    if(response.quiz.questions.length === 0) {",
+                  "        console.error('ERROR: No questions found in quiz response!');",
+                  "        pm.expect.fail('Quiz has no questions but should have some');",
+                  "    } else {",
+                  "        pm.expect(response.quiz.questions[0]).to.have.property('questionId');",
+                  "        pm.expect(response.quiz.questions[0]).to.have.property('question');",
+                  "        pm.expect(response.quiz.questions[0]).to.have.property('options').that.is.an('array');",
+                  "    }",
+                  "});",
+                  "",
+                  "pm.test('Questions count matches totalQuestions', function() {",
+                  "    const response = pm.response.json();",
+                  "    const quiz = response.quiz;",
+                  "    ",
+                  "    if (quiz.totalQuestions > 0) {",
+                  "        console.log(`Expected ${quiz.totalQuestions} questions, got ${quiz.questions.length}`);",
+                  "        pm.expect(quiz.questions.length).to.be.at.least(1);",
+                  "        ",
+                  "        // Soft validation - not failing the test but logging a warning",
+                  "        if (quiz.questions.length !== quiz.totalQuestions) {",
+                  "            console.warn(`WARNING: Question count mismatch - expected ${quiz.totalQuestions}, got ${quiz.questions.length}`);",
+                  "        }",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [

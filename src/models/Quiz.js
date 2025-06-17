@@ -69,34 +69,111 @@ class Quiz {  static async create({ userId, title, subject, grade, difficulty, t
       logger.error('Error creating quiz:', error);
       throw error;
     }
-  }
-
-  static async findById(quizId) {
+  }  static async findById(quizId) {
     try {
       const result = await query(
         'SELECT quiz_id, user_id, title, subject, grade, difficulty, total_questions, max_score, questions, created_at FROM quizzes WHERE quiz_id = $1',
         [quizId]
-      );      if (result.rows[0]) {
+      );
+      
+      if (result.rows[0]) {
         const quiz = result.rows[0];
+        
+        logger.info(`Found quiz ${quizId} in database with raw questions: ${quiz.questions ? (typeof quiz.questions === 'string' ? 'string with length ' + quiz.questions.length : typeof quiz.questions) : 'undefined'}`);
+        
+        // Always ensure we have questions as an array
         if (quiz.questions) {
           try {
             if (typeof quiz.questions === 'string') {
-              quiz.questions = JSON.parse(quiz.questions);
+              // Log the raw string for debugging
+              logger.debug(`Raw questions string for quiz ${quizId}: ${quiz.questions}`);
+              
+              // Handle case where string might be escaped JSON
+              let cleanString = quiz.questions;
+              if (cleanString.startsWith('"') && cleanString.endsWith('"')) {
+                try {
+                  // Might be an escaped JSON string, try to unescape
+                  cleanString = JSON.parse(cleanString);
+                  logger.info(`Unescaped JSON string for questions in quiz ${quizId}`);
+                } catch (e) {
+                  logger.warn(`Failed to unescape JSON string: ${e.message}`);
+                }
+              }
+              
+              // Now parse the string (possibly unescaped)
+              quiz.questions = JSON.parse(cleanString);
               logger.info(`Successfully parsed questions string to object with ${quiz.questions.length} questions`);
+              
+              // Extra verification if it's still a string after parsing
+              if (typeof quiz.questions === 'string') {
+                logger.warn(`Questions still a string after first parse, attempting second parse`);
+                quiz.questions = JSON.parse(quiz.questions);
+              }
+            } else if (!Array.isArray(quiz.questions)) {
+              logger.warn(`Quiz ${quizId} questions is not a string or array, setting to empty array`);
+              quiz.questions = [];
             }
           } catch (error) {
-            logger.error('Error parsing questions JSON in findById:', error);
-            quiz.questions = [];
+            logger.error(`Error parsing questions JSON in findById for quiz ${quizId}: ${error.message}`);
+            
+            // Direct database query as fallback
+            try {
+              const rawResult = await query(
+                'SELECT questions FROM quizzes WHERE quiz_id = $1',
+                [quizId]
+              );
+              
+              if (rawResult.rows[0] && rawResult.rows[0].questions) {
+                try {
+                  const rawQuestions = rawResult.rows[0].questions;
+                  logger.info(`Fallback: Direct database query returned raw questions of type ${typeof rawQuestions}`);
+                  
+                  if (typeof rawQuestions === 'string') {
+                    quiz.questions = JSON.parse(rawQuestions);
+                  } else {
+                    quiz.questions = rawQuestions;
+                  }
+                  
+                  if (Array.isArray(quiz.questions)) {
+                    logger.info(`Fallback successful! Retrieved ${quiz.questions.length} questions`);
+                  } else {
+                    logger.warn(`Fallback didn't return an array`);
+                    quiz.questions = [];
+                  }
+                } catch (e) {
+                  logger.error(`Fallback parsing failed: ${e.message}`);
+                  quiz.questions = [];
+                }
+              } else {
+                quiz.questions = [];
+              }
+            } catch (e) {
+              logger.error(`Fallback database query failed: ${e.message}`);
+              quiz.questions = [];
+            }
           }
         } else {
+          logger.warn(`No questions field found for quiz ${quizId}`);
           quiz.questions = [];
         }
+        
+        // Final validation of questions array
+        if (!Array.isArray(quiz.questions)) {
+          logger.warn(`Questions not an array after processing for quiz ${quizId}`);
+          quiz.questions = [];
+        } else if (quiz.questions.length === 0) {
+          logger.warn(`Quiz ${quizId} has zero questions after processing`);
+        } else {
+          logger.info(`Quiz ${quizId} has ${quiz.questions.length} questions after processing`);
+        }
+        
         return quiz;
       }
       
+      logger.warn(`Quiz ${quizId} not found in database`);
       return null;
     } catch (error) {
-      logger.error('Error finding quiz by ID:', error);
+      logger.error(`Error finding quiz ${quizId} by ID:`, error);
       throw error;
     }
   }

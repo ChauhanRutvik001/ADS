@@ -183,15 +183,150 @@ const cache = {
       logger.error('Cache FLUSH PATTERN error:', error);
       return false;
     }
-  },
-
-  // Specific cache functions for the application
-  async setQuiz(quizId, quiz, ttl = parseInt(process.env.CACHE_QUIZ_TTL) || 3600) {
-    return this.set(`quiz:${quizId}`, quiz, ttl);
+  },  // Specific cache functions for the application
+  async setQuiz(quizId, quizToCache, ttl = parseInt(process.env.CACHE_QUIZ_TTL) || 3600) {
+    logger.info(`Setting cache for quiz ${quizId}`);
+    
+    // Clone the quiz to avoid modifying the original object
+    quizToCache = JSON.parse(JSON.stringify(quizToCache));
+    
+    // Ensure questions is properly processed before caching
+    if (quizToCache.questions) {
+      if (typeof quizToCache.questions === 'string') {
+        try {
+          logger.info(`Converting questions string to object for quiz ${quizId} before caching`);
+          quizToCache.questions = JSON.parse(quizToCache.questions);
+          
+          // Check if it's still a string after parsing (double encoded)
+          if (typeof quizToCache.questions === 'string') {
+            logger.warn(`Questions still a string after parsing, attempting second parse for quiz ${quizId}`);
+            quizToCache.questions = JSON.parse(quizToCache.questions);
+          }
+        } catch (error) {
+          logger.error(`Error parsing questions JSON before caching: ${error.message}`);
+          // Try to fetch from database as fallback
+          try {
+            const freshQuiz = await require('../models/Quiz').findById(quizId);
+            if (freshQuiz && Array.isArray(freshQuiz.questions) && freshQuiz.questions.length > 0) {
+              quizToCache.questions = freshQuiz.questions;
+              logger.info(`Retrieved ${quizToCache.questions.length} questions directly from database for caching`);
+            } else {
+              logger.warn(`Couldn't get questions from database fallback or questions array is empty for quiz ${quizId}`);
+              quizToCache.questions = [];
+            }
+          } catch (e) {
+            logger.error(`Database fallback failed: ${e.message}`);
+            quizToCache.questions = [];
+          }
+        }
+      } else if (!Array.isArray(quizToCache.questions)) {
+        logger.warn(`Quiz ${quizId} questions is not a string or array, but a ${typeof quizToCache.questions}`);
+        quizToCache.questions = [];
+      }
+    } else {
+      logger.warn(`Quiz ${quizId} has no questions property before caching`);
+      
+      // Try to fetch from database as fallback
+      try {
+        const freshQuiz = await require('../models/Quiz').findById(quizId);
+        if (freshQuiz && Array.isArray(freshQuiz.questions) && freshQuiz.questions.length > 0) {
+          quizToCache.questions = freshQuiz.questions;
+          logger.info(`Retrieved ${quizToCache.questions.length} questions directly from database for empty questions property`);
+        } else {
+          quizToCache.questions = [];
+        }
+      } catch (e) {
+        logger.error(`Database fallback failed: ${e.message}`);
+        quizToCache.questions = [];
+      }
+    }
+    
+    // Validate that questions is an array and each item has required properties
+    if (!Array.isArray(quizToCache.questions)) {
+      logger.warn(`Setting questions to empty array for quiz ${quizId} before caching`);
+      quizToCache.questions = [];
+    } else if (quizToCache.questions.length === 0 && quizToCache.total_questions > 0) {
+      logger.warn(`Quiz ${quizId} has zero questions before caching but total_questions=${quizToCache.total_questions}`);
+      
+      // One last attempt to get questions from DB
+      try {
+        const rawResult = await db.query('SELECT questions FROM quizzes WHERE quiz_id = $1', [quizId]);
+        if (rawResult.rows[0] && rawResult.rows[0].questions) {
+          try {
+            const dbQuestions = JSON.parse(rawResult.rows[0].questions);
+            if (Array.isArray(dbQuestions) && dbQuestions.length > 0) {
+              quizToCache.questions = dbQuestions;
+              logger.info(`Last chance recovery: got ${dbQuestions.length} questions from direct DB query`);
+            }
+          } catch (e) {
+            logger.error(`Error parsing questions in last chance recovery: ${e.message}`);
+          }
+        }
+      } catch (e) {
+        logger.error(`Error in last chance DB query: ${e.message}`);
+      }
+    } else {
+      // Validate question items
+      const validQuestions = quizToCache.questions.filter(q => q && q.questionId && q.question);
+      if (validQuestions.length < quizToCache.questions.length) {
+        logger.warn(`Quiz ${quizId} had ${quizToCache.questions.length - validQuestions.length} invalid questions that were filtered out`);
+        quizToCache.questions = validQuestions;
+      }
+    }
+    
+    logger.info(`Caching quiz ${quizId} with ${quizToCache.questions.length} questions`);
+    return this.set(`quiz:${quizId}`, quizToCache, ttl);
   },
 
   async getQuiz(quizId) {
-    return this.get(`quiz:${quizId}`);
+    const quiz = await this.get(`quiz:${quizId}`);
+    if (quiz) {
+      // Handle case where questions might be a string in the cached object
+      if (quiz.questions && typeof quiz.questions === 'string') {
+        try {
+          logger.info(`Got quiz ${quizId} from cache with questions as string, parsing now`);
+          quiz.questions = JSON.parse(quiz.questions);
+          
+          // Check if it's still a string after parsing (double encoded)
+          if (typeof quiz.questions === 'string') {
+            logger.info('Detected double-encoded JSON for questions, parsing again');
+            quiz.questions = JSON.parse(quiz.questions);
+          }
+        } catch (error) {
+          logger.error(`Error parsing questions from cache for quiz ${quizId}: ${error.message}`);
+          quiz.questions = [];
+        }
+      }
+      
+      // Validate array
+      if (!Array.isArray(quiz.questions)) {
+        logger.warn(`Quiz ${quizId} questions from cache is not an array (type: ${typeof quiz.questions}), setting to empty array`);
+        quiz.questions = [];
+      }
+      
+      logger.info(`Got quiz ${quizId} from cache with ${quiz.questions.length} questions`);
+      
+      // If zero questions in cache but should have questions based on total_questions,
+      // try to get from database
+      if (quiz.questions.length === 0 && quiz.total_questions > 0) {
+        logger.warn(`Quiz ${quizId} has ${quiz.total_questions} expected questions but 0 actual questions in cache, attempting database fallback`);
+        try {
+          const freshQuiz = await require('../models/Quiz').findById(quizId);
+          if (freshQuiz && Array.isArray(freshQuiz.questions) && freshQuiz.questions.length > 0) {
+            quiz.questions = freshQuiz.questions;
+            logger.info(`Retrieved ${quiz.questions.length} questions from database fallback`);
+            
+            // Update cache with fixed data
+            await this.setQuiz(quizId, quiz);
+          } else {
+            logger.warn(`Database fallback didn't return valid questions for quiz ${quizId}`);
+          }
+        } catch (e) {
+          logger.error(`Database fallback in getQuiz failed: ${e.message}`);
+        }
+      }
+    }
+    return quiz;
   },
 
   async setUserHistory(userId, history, ttl = parseInt(process.env.CACHE_HISTORY_TTL) || 1800) {
