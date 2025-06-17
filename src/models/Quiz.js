@@ -2,20 +2,66 @@ const { query, transaction } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 
-class Quiz {
-  static async create({ userId, title, subject, grade, difficulty, totalQuestions, maxScore, questions }) {
+class Quiz {  static async create({ userId, title, subject, grade, difficulty, totalQuestions, maxScore, questions }) {
     try {
-      const quizId = `quiz_${uuidv4().replace(/-/g, '')}`;
+      // Log input parameters for debugging
+      logger.info(`Creating quiz with: userId=${userId}, title=${title}, subject=${subject}, grade=${grade}, difficulty=${difficulty}, totalQuestions=${totalQuestions}, maxScore=${maxScore}, questions=${questions ? Array.isArray(questions) ? questions.length : 'not array' : 'undefined'}`);
       
+      // If questions is not an array, make it one
+      const questionArray = Array.isArray(questions) ? questions : (questions ? [questions] : []);
+      
+      // Ensure questions is properly serialized for storage
+      const questionsJson = JSON.stringify(questionArray);
+      logger.info(`Serialized ${questionArray.length} questions to JSON for storage`);
+      
+      const quizId = `quiz_${uuidv4().replace(/-/g, '')}`;
       const result = await query(
         `INSERT INTO quizzes (quiz_id, user_id, title, subject, grade, difficulty, total_questions, max_score, questions, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
          RETURNING quiz_id, user_id, title, subject, grade, difficulty, total_questions, max_score, questions, created_at`,
-        [quizId, userId, title, subject, grade, difficulty, totalQuestions, maxScore, JSON.stringify(questions)]
+        [quizId, userId, title, subject, grade, difficulty, totalQuestions, maxScore, questionsJson]
       );
       
-      const quiz = result.rows[0];
-      quiz.questions = JSON.parse(quiz.questions);
+      let quiz = result.rows[0];
+      
+      // If SQLite doesn't return the row, manually create the quiz object
+      if (!quiz) {
+        quiz = {
+          quiz_id: quizId,
+          user_id: userId,
+          title,
+          subject,
+          grade,
+          difficulty,
+          total_questions: totalQuestions,
+          max_score: maxScore,
+          questions: questionsJson, // Store as JSON string for consistency
+          created_at: new Date().toISOString()
+        };
+      }
+      
+      // Ensure quiz_id is set
+      if (!quiz.quiz_id) {
+        quiz.quiz_id = quizId;
+      }
+      
+      // Parse questions if they are stored as a string
+      if (quiz.questions) {
+        try {
+          if (typeof quiz.questions === 'string') {
+            quiz.questions = JSON.parse(quiz.questions);
+            logger.info(`Successfully parsed questions string to object with ${quiz.questions.length} questions`);
+          } else {
+            logger.info(`Questions already in object form with type: ${typeof quiz.questions}`);
+          }
+        } catch (error) {
+          logger.error('Error parsing questions JSON:', error);
+          quiz.questions = [];
+        }
+      } else {
+        logger.warn('No questions field found in quiz');
+        quiz.questions = [];
+      }
       
       logger.info(`Quiz created: ${quizId} by user ${userId}`);
       return quiz;
@@ -30,11 +76,21 @@ class Quiz {
       const result = await query(
         'SELECT quiz_id, user_id, title, subject, grade, difficulty, total_questions, max_score, questions, created_at FROM quizzes WHERE quiz_id = $1',
         [quizId]
-      );
-      
-      if (result.rows[0]) {
+      );      if (result.rows[0]) {
         const quiz = result.rows[0];
-        quiz.questions = JSON.parse(quiz.questions);
+        if (quiz.questions) {
+          try {
+            if (typeof quiz.questions === 'string') {
+              quiz.questions = JSON.parse(quiz.questions);
+              logger.info(`Successfully parsed questions string to object with ${quiz.questions.length} questions`);
+            }
+          } catch (error) {
+            logger.error('Error parsing questions JSON in findById:', error);
+            quiz.questions = [];
+          }
+        } else {
+          quiz.questions = [];
+        }
         return quiz;
       }
       
@@ -117,11 +173,11 @@ class Quiz {
         `UPDATE quizzes SET ${setClause.join(', ')} WHERE quiz_id = $${paramIndex} 
          RETURNING quiz_id, user_id, title, subject, grade, difficulty, total_questions, max_score, questions, created_at`,
         values
-      );
-
-      if (result.rows[0]) {
+      );      if (result.rows[0]) {
         const quiz = result.rows[0];
-        quiz.questions = JSON.parse(quiz.questions);
+        if (quiz.questions) {
+          quiz.questions = JSON.parse(quiz.questions);
+        }
         logger.info(`Quiz updated: ${quizId}`);
         return quiz;
       }

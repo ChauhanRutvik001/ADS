@@ -2,40 +2,79 @@ const Joi = require('joi');
 const logger = require('../utils/logger');
 
 // Validation schemas
-const schemas = {
-  // Auth schemas
+const schemas = {  // Auth schemas
   login: Joi.object({
-    username: Joi.string().alphanum().min(3).max(30).required(),
+    username: Joi.string().pattern(/^[a-zA-Z0-9_]+$/).min(3).max(30).required()
+      .messages({
+        'string.pattern.base': 'Username must contain only letters, numbers, and underscores'
+      }),
     password: Joi.string().min(6).required()
   }),
 
   register: Joi.object({
-    username: Joi.string().alphanum().min(3).max(30).required(),
+    username: Joi.string().pattern(/^[a-zA-Z0-9_]+$/).min(3).max(30).required()
+      .messages({
+        'string.pattern.base': 'Username must contain only letters, numbers, and underscores'
+      }),
     password: Joi.string().min(6).pattern(new RegExp('^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#\\$%\\^&\\*])')).required()
       .messages({
         'string.pattern.base': 'Password must contain at least one lowercase letter, one uppercase letter, one number, and one special character'
       }),
     email: Joi.string().email().required()
-  }),
-
-  // Quiz generation schema
+  }),  // Quiz generation schema
   generateQuiz: Joi.object({
     grade: Joi.number().integer().min(1).max(12).required(),
-    Subject: Joi.string().min(2).max(50).required(),
-    TotalQuestions: Joi.number().integer().min(1).max(50).required(),
-    MaxScore: Joi.number().integer().min(1).max(500).required(),
-    Difficulty: Joi.string().valid('EASY', 'MEDIUM', 'HARD').required()
-  }),
-
-  // Quiz submission schema
+    // Support both camelCase and PascalCase field names
+    subject: Joi.string().min(2).max(50),
+    Subject: Joi.string().min(2).max(50),
+    numQuestions: Joi.number().integer().min(1).max(50),
+    totalQuestions: Joi.number().integer().min(1).max(50),
+    TotalQuestions: Joi.number().integer().min(1).max(50),
+    maxScore: Joi.number().integer().min(1).max(500),
+    MaxScore: Joi.number().integer().min(1).max(500),
+    difficulty: Joi.string().valid('EASY', 'MEDIUM', 'HARD'),
+    Difficulty: Joi.string().valid('EASY', 'MEDIUM', 'HARD'),
+    topics: Joi.array().items(Joi.string()).optional()
+  }).custom((value, helpers) => {
+    // Ensure one of the subject fields is present
+    if (!value.subject && !value.Subject) {
+      return helpers.error('any.required', { path: ['subject'] });
+    }
+    // Ensure one of the question count fields is present
+    if (!value.numQuestions && !value.totalQuestions && !value.TotalQuestions) {
+      return helpers.error('any.required', { path: ['numQuestions'] });
+    }
+    // Ensure one of the difficulty fields is present
+    if (!value.difficulty && !value.Difficulty) {
+      return helpers.error('any.required', { path: ['difficulty'] });
+    }
+    // Ensure one of the maxScore fields is present
+    if (!value.maxScore && !value.MaxScore) {
+      value.maxScore = 10; // Default value if not provided
+    }
+    return value;
+  }),  // Quiz submission schema
   submitQuiz: Joi.object({
-    quizId: Joi.string().pattern(/^quiz_[a-f0-9]{32}$/).required(),
+    quizId: Joi.string().required(),
+    // Support both formats: answers object or responses array
+    answers: Joi.object().pattern(
+      Joi.string(),
+      Joi.string()
+    ),
     responses: Joi.array().items(
       Joi.object({
         questionId: Joi.string().required(),
         userResponse: Joi.string().required()
       })
-    ).min(1).required()
+    )
+  }).custom((value, helpers) => {
+    // Require either answers or responses, but not necessarily both
+    if (!value.answers && (!value.responses || !value.responses.length)) {
+      return helpers.error('object.missing', { 
+        message: 'Either "answers" object or "responses" array must be provided'
+      });
+    }
+    return value;
   }),
 
   // Query parameters for history

@@ -78,56 +78,78 @@ const quizController = {
    *         description: Unauthorized
    *       502:
    *         description: AI service error
-   */
-  async generateQuiz(req, res, next) {
+   */  async generateQuiz(req, res, next) {
     try {
-      const { grade, Subject: subject, TotalQuestions: totalQuestions, MaxScore: maxScore, Difficulty: difficulty } = req.body;
-      const userId = req.user.id;
-
-      logger.info(`Generating quiz for user ${userId}: ${subject}, Grade ${grade}, ${difficulty}`);
-
-      // Generate quiz using AI service
-      const aiQuizData = await aiService.generateQuiz(grade, subject, totalQuestions, maxScore, difficulty);
+      // Normalize field names from various formats
+      const { 
+        grade, 
+        subject = req.body.Subject, 
+        numQuestions = req.body.totalQuestions || req.body.TotalQuestions,
+        totalQuestions = req.body.numQuestions || req.body.TotalQuestions,
+        maxScore = req.body.MaxScore || 10, // Default maxScore to 10 if not provided
+        difficulty = req.body.Difficulty
+      } = req.body;
       
-      // Create title
-      const title = `Grade ${grade} ${subject} Quiz`;
-
-      // Save quiz to database
+      // Use normalized field names
+      const finalSubject = subject;
+      const finalTotalQuestions = numQuestions || totalQuestions;
+      const finalMaxScore = maxScore;
+      const finalDifficulty = difficulty;
+        const userId = req.user.id;
+      
+      logger.info(`Generating quiz for user ${userId}: ${finalSubject}, Grade ${grade}, ${finalDifficulty}`);        // Generate quiz using AI service
+      const aiQuizData = await aiService.generateQuiz(grade, finalSubject, finalTotalQuestions, finalMaxScore, finalDifficulty);
+      console.log(aiQuizData + "  data comes from AI service");
+      logger.info('AI Quiz Data received:', JSON.stringify(aiQuizData, null, 2));
+        // Create title
+      const title = `Grade ${grade} ${finalSubject} Quiz`;      // Save quiz to database
+      logger.info('Questions to be saved:', JSON.stringify(aiQuizData.questions, null, 2));
+      
+      // Ensure we're using the normalized field names
       const quiz = await Quiz.create({
         userId,
         title,
-        subject,
+        subject: finalSubject,
         grade,
-        difficulty,
-        totalQuestions,
-        maxScore,
-        questions: aiQuizData.questions
+        difficulty: finalDifficulty,
+        totalQuestions: finalTotalQuestions,
+        maxScore: finalMaxScore,
+        questions: aiQuizData.questions || []
       });
 
+      logger.info('Quiz created in database:', JSON.stringify(quiz, null, 2));
+      logger.info('Quiz questions type:', typeof quiz.questions);
+      logger.info('Quiz questions is array:', Array.isArray(quiz.questions));
+      logger.info('Quiz questions length:', Array.isArray(quiz.questions) ? quiz.questions.length : 'not an array');
+
       // Cache the quiz
-      await cache.setQuiz(quiz.quiz_id, quiz);
-
-      logger.info(`Quiz generated successfully: ${quiz.quiz_id}`);
-
-      res.json({
+      await cache.setQuiz(quiz.quiz_id, quiz);      logger.info(`Quiz generated successfully: ${quiz.quiz_id}`);
+      
+      // Important: Since the questions may be saved in the DB but not properly returned in the quiz object,
+      // we'll use the original aiQuizData.questions that we know are valid
+      const questions = aiQuizData.questions || [];
+      logger.info(`Returning ${questions.length} questions in response from original aiQuizData`);
+      
+      res.status(201).json({
         success: true,
-        quiz: {
-          quizId: quiz.quiz_id,
+        data: {
+          quiz_id: quiz.quiz_id,
           title: quiz.title,
           grade: quiz.grade,
-          Subject: quiz.subject,
-          TotalQuestions: quiz.total_questions,
-          MaxScore: quiz.max_score,
-          Difficulty: quiz.difficulty,
-          questions: quiz.questions.map(q => ({
+          subject: quiz.subject,
+          total_questions: quiz.total_questions,
+          max_score: quiz.max_score,
+          difficulty: quiz.difficulty,
+          questions: questions.map(q => ({
             questionId: q.questionId,
             question: q.question,
             type: q.type,
             options: q.options,
             correctAnswer: q.correctAnswer,
-            marks: q.marks
+            marks: q.marks,
+            explanation: q.explanation
           })),
-          createdAt: quiz.created_at
+          created_at: quiz.created_at
         }
       });
     } catch (error) {
@@ -169,13 +191,13 @@ const quizController = {
    *         description: Unauthorized
    *       404:
    *         description: Quiz not found
-   */
-  async submitQuiz(req, res, next) {
+   */  async submitQuiz(req, res, next) {
     try {
-      const { quizId, responses } = req.body;
+      const { quizId, responses: submittedResponses, answers } = req.body;
       const userId = req.user.id;
 
       logger.info(`Quiz submission for user ${userId}, quiz ${quizId}`);
+      logger.info('Request payload:', JSON.stringify(req.body, null, 2));
 
       // Find the quiz
       let quiz = await cache.getQuiz(quizId);
@@ -193,6 +215,34 @@ const quizController = {
         // Cache the quiz for future use
         await cache.setQuiz(quizId, quiz);
       }
+      
+      // Parse questions if they're a string
+      if (quiz.questions && typeof quiz.questions === 'string') {
+        try {
+          quiz.questions = JSON.parse(quiz.questions);
+          logger.info(`Successfully parsed questions in submitQuiz, found ${quiz.questions.length} questions`);
+        } catch (error) {
+          logger.error('Error parsing questions in submitQuiz:', error);
+          quiz.questions = [];
+        }
+      }
+
+      // Handle both response formats (responses array or answers object)
+      let responses;
+      if (submittedResponses && Array.isArray(submittedResponses)) {
+        responses = submittedResponses;
+        logger.info(`Using responses array format with ${responses.length} items`);
+      } else if (answers) {
+        // Convert answers object to responses array format for backward compatibility
+        responses = Object.entries(answers || {}).map(([questionId, userResponse]) => ({
+          questionId,
+          userResponse
+        }));
+        logger.info(`Converted answers object to responses array with ${responses.length} items`);
+      } else {
+        responses = [];
+        logger.warn('No responses or answers provided in the request');
+      }
 
       // Validate responses
       if (responses.length === 0) {
@@ -204,11 +254,15 @@ const quizController = {
         });
       }
 
+      // Log the responses for debugging
+      logger.info('Normalized responses:', JSON.stringify(responses, null, 2));
+
       // Check if user has already submitted this quiz (for retry logic)
       const existingSubmission = await Submission.getLastSubmission(userId, quizId);
       const isRetry = !!existingSubmission;
 
       // Evaluate quiz using AI service
+      logger.info('Sending quiz and responses to AI service for evaluation');
       const evaluationResult = await aiService.evaluateQuiz(quiz, responses);
 
       // Create submission record
@@ -461,8 +515,25 @@ const quizController = {
       const lastSubmission = hasAttempted ? await Submission.getLastSubmission(userId, quizId) : null;
 
       // Get quiz statistics
-      const stats = await Quiz.getQuizStats(quizId);
-
+      const stats = await Quiz.getQuizStats(quizId);      // Parse questions if they're not already an object
+      if (quiz.questions && typeof quiz.questions === 'string') {
+        try {
+          quiz.questions = JSON.parse(quiz.questions);
+          logger.info(`Successfully parsed questions from string in getQuiz, found ${quiz.questions.length} questions`);
+        } catch (error) {
+          logger.error('Error parsing questions in getQuiz:', error);
+          quiz.questions = [];
+        }
+      }
+      
+      // Ensure we have an array even if the field is empty
+      if (!quiz.questions || !Array.isArray(quiz.questions)) {
+        logger.warn('Questions not found or not an array in getQuiz, using empty array');
+        quiz.questions = [];
+      }
+      
+      logger.info(`Returning quiz ${quizId} with ${quiz.questions.length} questions`);
+      
       res.json({
         success: true,
         quiz: {
@@ -475,6 +546,16 @@ const quizController = {
           difficulty: quiz.difficulty,
           createdAt: quiz.created_at,
           hasAttempted,
+          questions: quiz.questions.map(q => ({
+            questionId: q.questionId,
+            question: q.question,
+            type: q.type,
+            options: q.options,
+            marks: q.marks,
+            // Don't include correctAnswer if user has not attempted
+            ...(hasAttempted && { correctAnswer: q.correctAnswer }),
+            ...(hasAttempted && { explanation: q.explanation })
+          })),
           lastSubmission: lastSubmission ? {
             submissionId: lastSubmission.submission_id,
             score: lastSubmission.score,
