@@ -7,6 +7,15 @@ class Submission {
     try {
       const submissionId = `sub_${uuidv4().replace(/-/g, '')}`;
       
+      // Ensure all values that will be stringified are initialized to prevent JSON.parse(undefined)
+      const safeResponses = responses || [];
+      const safeDetailedResults = detailedResults || [];
+      const safeSuggestions = suggestions || [];
+      
+      // Log values for debugging
+      logger.info(`Creating submission for quiz ${quizId}, user ${userId} with ${safeResponses.length} responses`);
+      logger.info(`Score: ${score}/${maxScore} (${percentage}%)`);
+      
       const result = await query(
         `INSERT INTO quiz_submissions (
           submission_id, quiz_id, user_id, responses, score, max_score, percentage, 
@@ -16,15 +25,34 @@ class Submission {
         RETURNING submission_id, quiz_id, user_id, responses, score, max_score, percentage, 
                   detailed_results, suggestions, completed_at, is_retry, original_submission_id`,
         [
-          submissionId, quizId, userId, JSON.stringify(responses), score, maxScore, percentage,
-          JSON.stringify(detailedResults), JSON.stringify(suggestions), isRetry, originalSubmissionId
+          submissionId, quizId, userId, JSON.stringify(safeResponses), score, maxScore, percentage,
+          JSON.stringify(safeDetailedResults), JSON.stringify(safeSuggestions), isRetry, originalSubmissionId
         ]
       );
       
       const submission = result.rows[0];
-      submission.responses = JSON.parse(submission.responses);
-      submission.detailed_results = JSON.parse(submission.detailed_results);
-      submission.suggestions = JSON.parse(submission.suggestions);
+      
+      // Safely parse JSON fields with error handling
+      try {
+        submission.responses = JSON.parse(submission.responses || '[]');
+      } catch (e) {
+        logger.error('Error parsing responses JSON:', e);
+        submission.responses = [];
+      }
+      
+      try {
+        submission.detailed_results = JSON.parse(submission.detailed_results || '[]');
+      } catch (e) {
+        logger.error('Error parsing detailed_results JSON:', e);
+        submission.detailed_results = [];
+      }
+      
+      try {
+        submission.suggestions = JSON.parse(submission.suggestions || '[]');
+      } catch (e) {
+        logger.error('Error parsing suggestions JSON:', e);
+        submission.suggestions = [];
+      }
       
       logger.info(`Quiz submission created: ${submissionId} for quiz ${quizId} by user ${userId}`);
       return submission;

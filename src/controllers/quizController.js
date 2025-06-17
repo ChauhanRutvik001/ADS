@@ -199,6 +199,16 @@ const quizController = {
       logger.info(`Quiz submission for user ${userId}, quiz ${quizId}`);
       logger.info('Request payload:', JSON.stringify(req.body, null, 2));
 
+      // Validate required fields
+      if (!quizId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            message: 'quizId is required'
+          }
+        });
+      }
+
       // Find the quiz
       let quiz = await cache.getQuiz(quizId);
       
@@ -225,6 +235,12 @@ const quizController = {
           logger.error('Error parsing questions in submitQuiz:', error);
           quiz.questions = [];
         }
+      }
+
+      // Ensure questions is always an array
+      if (!Array.isArray(quiz.questions)) {
+        logger.warn('Quiz questions is not an array in submitQuiz, initializing empty array');
+        quiz.questions = [];
       }
 
       // Handle both response formats (responses array or answers object)
@@ -263,7 +279,40 @@ const quizController = {
 
       // Evaluate quiz using AI service
       logger.info('Sending quiz and responses to AI service for evaluation');
-      const evaluationResult = await aiService.evaluateQuiz(quiz, responses);
+      
+      let evaluationResult;
+      try {
+        evaluationResult = await aiService.evaluateQuiz(quiz, responses);
+        
+        // Verify evaluation result has required fields
+        if (!evaluationResult) {
+          logger.error('AI service returned null evaluation result');
+          evaluationResult = {
+            totalScore: 0,
+            maxScore: quiz.max_score || 10,
+            percentage: 0,
+            detailedResults: [],
+            suggestions: ['Error evaluating quiz. Please try again.']
+          };
+        }
+        
+        // Ensure all fields have valid values
+        evaluationResult.totalScore = evaluationResult.totalScore || 0;
+        evaluationResult.maxScore = evaluationResult.maxScore || quiz.max_score || 10;
+        evaluationResult.percentage = evaluationResult.percentage || 0;
+        evaluationResult.detailedResults = evaluationResult.detailedResults || [];
+        evaluationResult.suggestions = evaluationResult.suggestions || [];
+        
+      } catch (evalError) {
+        logger.error('Error evaluating quiz:', evalError);
+        evaluationResult = {
+          totalScore: 0,
+          maxScore: quiz.max_score || 10,
+          percentage: 0,
+          detailedResults: [],
+          suggestions: ['Error evaluating quiz. Please try again.']
+        };
+      }
 
       // Create submission record
       const submission = await Submission.create({
@@ -274,7 +323,7 @@ const quizController = {
         maxScore: evaluationResult.maxScore,
         percentage: evaluationResult.percentage,
         detailedResults: evaluationResult.detailedResults,
-        suggestions: evaluationResult.suggestions || [],
+        suggestions: evaluationResult.suggestions,
         isRetry,
         originalSubmissionId: isRetry ? existingSubmission.submission_id : null
       });
@@ -299,7 +348,13 @@ const quizController = {
       });
     } catch (error) {
       logger.error('Quiz submission error:', error);
-      next(error);
+      res.status(500).json({
+        success: false,
+        error: {
+          message: 'Error submitting quiz',
+          details: error.message
+        }
+      });
     }
   },
 

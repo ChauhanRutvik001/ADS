@@ -25,10 +25,14 @@
       "key": "quizId",
       "value": "",
       "type": "string"
-    },
-    {
+    },    {
       "key": "submissionId",
       "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dynamicResponses",
+      "value": "[\n    {\"questionId\": \"q1\", \"userResponse\": \"A\"},\n    {\"questionId\": \"q2\", \"userResponse\": \"B\"}\n  ]",
       "type": "string"
     }
   ],
@@ -330,8 +334,7 @@
                   "    pm.expect(response).to.have.property('success').that.is.true;",
                   "    pm.expect(response).to.have.property('quiz').that.is.an('object');",
                   "});",
-                  "",
-                  "pm.test('Quiz has questions array', function() {",
+                  "",                  "pm.test('Quiz has questions array', function() {",
                   "    const response = pm.response.json();",
                   "    pm.expect(response.quiz).to.have.property('questions').that.is.an('array');",
                   "    console.log('Number of questions returned: ' + response.quiz.questions.length);",
@@ -340,6 +343,15 @@
                   "        console.error('ERROR: No questions found in quiz response!');",
                   "        pm.expect.fail('Quiz has no questions but should have some');",
                   "    } else {",
+                  "        // Save question IDs for quiz submission",
+                  "        const questions = response.quiz.questions;",
+                  "        const responses = questions.map(q => ({",
+                  "            questionId: q.questionId,",
+                  "            userResponse: q.options && q.options.length > 0 ? 'A' : '' // Default to 'A' for testing",
+                  "        }));",
+                  "        pm.collectionVariables.set('dynamicResponses', JSON.stringify(responses, null, 2));",
+                  "        console.log(`Saved ${responses.length} question responses for submission`);",
+                  "        ",
                   "        pm.expect(response.quiz.questions[0]).to.have.property('questionId');",
                   "        pm.expect(response.quiz.questions[0]).to.have.property('question');",
                   "        pm.expect(response.quiz.questions[0]).to.have.property('options').that.is.an('array');",
@@ -379,20 +391,91 @@
             }
           },
           "response": []
-        },
-        {
+        },        {
           "name": "Submit Quiz Answers",
           "event": [
             {
               "listen": "test",
               "script": {
-                "exec": [                  "if (pm.response.code === 200) {",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has successful submission', function() {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response).to.have.property('success').that.is.true;",
+                  "    pm.expect(response).to.have.property('submission').that.is.an('object');",
+                  "});",
+                  "",
+                  "pm.test('Submission has expected fields', function() {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.submission).to.have.property('submissionId');",
+                  "    pm.expect(response.submission).to.have.property('score');",
+                  "    pm.expect(response.submission).to.have.property('maxScore');",
+                  "    pm.expect(response.submission).to.have.property('percentage');",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
                   "    const response = pm.response.json();",
                   "    if (response.success && response.submission && response.submission.submissionId) {",
                   "        pm.collectionVariables.set('submissionId', response.submission.submissionId);",
                   "        console.log('Submission ID set to: ' + response.submission.submissionId);",
                   "    }",
                   "}"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// First fetch the quiz details to get the actual question IDs",
+                  "const getQuizUrl = pm.variables.get('baseUrl') + '/api/quiz/' + pm.variables.get('quizId');",
+                  "",
+                  "const getQuizRequest = {",
+                  "  url: getQuizUrl,",
+                  "  method: 'GET',",
+                  "  header: {",
+                  "    'Authorization': 'Bearer ' + pm.variables.get('authToken'),",
+                  "    'Content-Type': 'application/json'",
+                  "  }",
+                  "};",
+                  "",
+                  "pm.sendRequest(getQuizRequest, function (err, res) {",
+                  "    if (err) {",
+                  "        console.error('Error fetching quiz:', err);",
+                  "        return;",
+                  "    }",
+                  "    ",
+                  "    try {",
+                  "        const quizData = res.json();",
+                  "        ",
+                  "        if (quizData.success && quizData.quiz && quizData.quiz.questions) {",
+                  "            const questions = quizData.quiz.questions;",
+                  "            console.log(`Found ${questions.length} questions in quiz`);",
+                  "            ",
+                  "            if (questions.length > 0) {",
+                  "                // Generate response array with actual question IDs",
+                  "                const responses = questions.map(q => ({",
+                  "                    questionId: q.questionId,",
+                  "                    userResponse: 'A' // Default answer for testing",
+                  "                }));",
+                  "                ",
+                  "                // Set generated responses for the request body",
+                  "                pm.variables.set('dynamicResponses', JSON.stringify(responses, null, 2));",
+                  "                console.log(`Generated ${responses.length} responses for submission`);",
+                  "            } else {",
+                  "                console.warn('No questions found in quiz');",
+                  "            }",
+                  "        } else {",
+                  "            console.error('Invalid quiz data format or quiz not found');",
+                  "        }",
+                  "    } catch (e) {",
+                  "        console.error('Error processing quiz data:', e);",
+                  "    }",
+                  "});",
+                  ""
                 ]
               }
             }
@@ -410,7 +493,7 @@
               }
             ],            "body": {
               "mode": "raw",
-              "raw": "{\n  \"quizId\": \"{{quizId}}\",\n  \"responses\": [\n    {\"questionId\": \"q1\", \"userResponse\": \"A\"},\n    {\"questionId\": \"q2\", \"userResponse\": \"D\"},\n    {\"questionId\": \"q3\", \"userResponse\": \"B\"}\n  ]\n}"
+              "raw": "{\n  \"quizId\": \"{{quizId}}\",\n  \"responses\": {{dynamicResponses}}\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/quiz/submit",
