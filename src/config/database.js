@@ -1,6 +1,6 @@
 const { Pool } = require('pg');
 const logger = require('../utils/logger');
-const { initializeSQLite } = require('./dev-database');
+const { initializeSQLite } = require('./dev-database-fixed');
 
 let pool;
 let sqliteClient;
@@ -28,14 +28,13 @@ const connectDatabase = async () => {
     });
 
     usingPostgreSQL = true;
-    return pool;
-  } catch (error) {
+    return pool;  } catch (error) {
     logger.warn('PostgreSQL connection failed, falling back to SQLite for development:', error.message);
       // Fallback to SQLite for development
     try {
-      const db = await initializeSQLite();
+      sqliteClient = await initializeSQLite();
       usingPostgreSQL = false;
-      return db;
+      return sqliteClient;
     } catch (sqliteError) {
       logger.error('❌ Both PostgreSQL and SQLite connections failed:', sqliteError);
       throw sqliteError;

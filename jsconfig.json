@@ -5,26 +5,12 @@
     "lib": ["ES2020"],
     "allowJs": true,
     "checkJs": false,
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": false,
-    "declarationMap": false,
-    "sourceMap": true,
-    "removeComments": true,
-    "noImplicitAny": false,
-    "strictNullChecks": false,
-    "strictFunctionTypes": false,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": false,
-    "noImplicitOverride": false,
-    "allowUnreachableCode": false,
-    "allowUnusedLabels": false,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
     "baseUrl": "./",
     "paths": {
       "@/*": ["src/*"],
@@ -33,17 +19,18 @@
       "@/services/*": ["src/services/*"],
       "@/utils/*": ["src/utils/*"],
       "@/config/*": ["src/config/*"],
-      "@/middleware/*": ["src/middleware/*"]
+      "@/middleware/*": ["src/middleware/*"],
+      "@/routes/*": ["src/routes/*"]
     }
-  },
-  "include": [
+  },  "include": [
     "src/**/*",
-    "tests/**/*"
-  ],
-  "exclude": [
+    "tests/**/*",
+    "*.js"
+  ],  "exclude": [
     "node_modules",
     "dist",
     "coverage",
-    "logs"
+    "logs",
+    "*.db"
   ]
 }

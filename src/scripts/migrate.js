@@ -8,8 +8,16 @@ async function runMigrations() {
     logger.info('Starting database migrations...');
 
     // Connect to database
-    await connectDatabase();
+    const db = await connectDatabase();
 
+    // Check if we're using SQLite (which already has tables created)
+    if (db && db.constructor.name === 'SQLiteWrapper') {
+      logger.info('✅ Using SQLite database - tables already created and seeded');
+      process.exit(0);
+      return;
+    }
+
+    // PostgreSQL migrations only
     // Read and execute the init.sql file
     const sqlFilePath = path.join(__dirname, '..', '..', 'database', 'init.sql');
     
@@ -51,20 +59,22 @@ async function runMigrations() {
         logger.error(`Error executing statement ${i + 1}:`, error);
         throw error;
       }
+    }    logger.info('✅ Database migrations completed successfully');
+    
+    // Verify tables were created (PostgreSQL only)
+    try {
+      const result = await query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_type = 'BASE TABLE'
+        ORDER BY table_name
+      `);
+      
+      logger.info('Created tables:', result.rows.map(row => row.table_name));
+    } catch (error) {
+      logger.debug('Table verification skipped (likely SQLite)');
     }
-
-    logger.info('✅ Database migrations completed successfully');
-    
-    // Verify tables were created
-    const result = await query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      AND table_type = 'BASE TABLE'
-      ORDER BY table_name
-    `);
-    
-    logger.info('Created tables:', result.rows.map(row => row.table_name));
     
     process.exit(0);
   } catch (error) {
