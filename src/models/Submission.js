@@ -27,10 +27,27 @@ class Submission {
         [
           submissionId, quizId, userId, JSON.stringify(safeResponses), score, maxScore, percentage,
           JSON.stringify(safeDetailedResults), JSON.stringify(safeSuggestions), isRetry, originalSubmissionId
-        ]
-      );
+        ]      );
+        let submission = result.rows[0];
       
-      const submission = result.rows[0];
+      // If rows[0] is undefined (can happen with some DB drivers), create a fallback submission object
+      if (!submission) {
+        logger.warn('Database did not return the created submission, creating fallback object');
+        submission = {
+          submission_id: submissionId,
+          quiz_id: quizId,
+          user_id: userId,
+          score: score,
+          max_score: maxScore,
+          percentage: percentage,
+          responses: JSON.stringify(safeResponses),
+          detailed_results: JSON.stringify(safeDetailedResults),
+          suggestions: JSON.stringify(safeSuggestions),
+          completed_at: new Date().toISOString(),
+          is_retry: isRetry,
+          original_submission_id: originalSubmissionId
+        };
+      }
       
       // Safely parse JSON fields with error handling
       try {
@@ -38,7 +55,7 @@ class Submission {
       } catch (e) {
         logger.error('Error parsing responses JSON:', e);
         submission.responses = [];
-      }      try {
+      }try {
         // Parse the detailed results and store them in both camelCase and snake_case properties
         const detailedResults = JSON.parse(submission.detailed_results || '[]');
         submission.detailed_results = detailedResults;

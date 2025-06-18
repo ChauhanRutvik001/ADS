@@ -3,6 +3,8 @@ const Submission = require('../models/Submission');
 const aiService = require('../services/aiService');
 const { cache } = require('../config/redis');
 const logger = require('../utils/logger');
+const emailService = require('../utils/emailService');
+const User = require('../models/User');
 
 /**
  * @swagger
@@ -353,38 +355,81 @@ const quizController = {
       });
 
       // Invalidate user cache
-      await cache.invalidateUserCache(userId);
-
-      logger.info(`Quiz submitted successfully: ${submission.submission_id}, Score: ${evaluationResult.totalScore}/${evaluationResult.maxScore}`);      // Log the submission object to verify its structure
+      await cache.invalidateUserCache(userId);      // Make sure we have a valid submission ID
+      if (!submission.submission_id) {
+        submission.submission_id = `sub_fallback_${Date.now()}`;
+        logger.warn(`Submission ID missing, using fallback ID: ${submission.submission_id}`);
+      }
+      
+      logger.info(`Quiz submitted successfully: ${submission.submission_id}, Score: ${evaluationResult.totalScore}/${evaluationResult.maxScore}`);
+      
+      // Log the submission object to verify its structure
       logger.info(`Submission details: ${JSON.stringify({
         id: submission.submission_id,
         responses: submission.responses ? submission.responses.length : 'none',
         detailed_results: submission.detailed_results ? submission.detailed_results.length : 'none',
         suggestions: submission.suggestions ? submission.suggestions.length : 'none'
       })}`);
-      
-      // Log the actual submission ID for debugging
+        // Log the actual submission ID for debugging
       logger.info(`Actual submission ID value: "${submission.submission_id}"`);
-      logger.info(`submission object keys: ${Object.keys(submission).join(', ')}`);// Log the actual evaluation result
+      logger.info(`submission object keys: ${Object.keys(submission).join(', ')}`);
       logger.info('Original evaluationResult:', JSON.stringify(evaluationResult, null, 2));
       
       // Normalize detailed results to ensure all expected fields are present
       const normalizedResults = (evaluationResult.detailedResults || []).map(result => {
         return {
-          questionId: result.questionId,
-          question: result.question,
+          questionId: result.questionId || 'q1',
+          question: result.question || 'Question',
           correct: result.correct !== undefined ? result.correct : result.isCorrect,
-          userResponse: result.userResponse,
-          correctResponse: result.correctResponse || result.correctAnswer,
+          userResponse: result.userResponse || '',
+          correctResponse: result.correctResponse || result.correctAnswer || '',
           marks: result.marks || 0,
-          maxMarks: result.maxMarks || evaluationResult.maxScore / evaluationResult.detailedResults.length,
+          maxMarks: result.maxMarks || (evaluationResult.detailedResults && evaluationResult.detailedResults.length > 0 ? 
+            evaluationResult.maxScore / evaluationResult.detailedResults.length : evaluationResult.maxScore),
           feedback: result.feedback || ((result.correct || result.isCorrect) ? 'Correct!' : 'Incorrect')
         };
       });
-      
-      // Ensure proper naming of properties and handle null results
+        // Ensure proper naming of properties and handle null results
       // Use the evaluationResult directly where possible as the source of truth      // Ensure we have a valid submission ID, even if it's missing from the DB response
       const submissionId = submission.submission_id || `sub_${Date.now()}`;
+      
+      // Send email notification if email service is configured (after normalizedResults is defined)
+      if (emailService.isConfigured()) {
+        try {
+          // Get user details for email
+          const user = await User.findById(userId);
+          
+          // Send email if user has an email address
+          if (user && user.email) {
+            // Ensure we have suggestions, even if AI didn't provide any
+            const emailSuggestions = evaluationResult.suggestions && evaluationResult.suggestions.length > 0
+              ? evaluationResult.suggestions
+              : [
+                'Review the questions you answered incorrectly to understand the correct answers.',
+                'Practice more problems on this topic to reinforce your understanding.'
+              ];
+            
+            // Send the email
+            await emailService.sendQuizResults({
+              to: user.email,
+              username: user.username || 'Student',
+              quizTitle: quiz.title || 'Quiz',
+              score: evaluationResult.totalScore,
+              maxScore: evaluationResult.maxScore,
+              percentage: evaluationResult.percentage,
+              detailedResults: normalizedResults || [],
+              suggestions: emailSuggestions
+            });
+            
+            logger.info(`Email sent to ${user.email} with quiz results`);
+          } else {
+            logger.warn(`Cannot send email notification - no email found for user ${userId}`);
+          }
+        } catch (emailError) {
+          // Log but don't fail the request if email sending fails
+          logger.error('Error sending email notification:', emailError);
+        }
+      }
       
       res.json({
         success: true,
