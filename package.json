@@ -2,17 +2,21 @@
   "name": "ai-quizzer-backend",
   "version": "1.0.0",
   "description": "AI-powered quiz application backend with authentication, quiz generation, evaluation, and history management",
-  "main": "src/app.js",
-  "scripts": {
-    "setup": "node setup.js",
+  "main": "src/app.js",  "scripts": {
+    "setup": "node scripts/setup.js",
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "migrate": "node src/scripts/migrate.js",
     "seed": "node src/scripts/seed.js",
     "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint:fix": "eslint src/ --fix",
+    "verify-db": "node scripts/verify-database.js",
+    "check-health": "node scripts/healthcheck.js",
+    "docker-build": "docker build -t ai-quizzer-backend .",
+    "docker-run": "docker run -p 3000:3000 ai-quizzer-backend"
   },
   "keywords": [
     "ai",

@@ -118,16 +118,17 @@ describe('Protected Routes', () => {
       .post('/api/quiz/generate')
       .set('Authorization', `Bearer ${authToken}`)
       .send(quizData)
-      .expect(200);
+      .expect(201);
 
     expect(response.body).toHaveProperty('success', true);
-    expect(response.body).toHaveProperty('quiz');
-    expect(response.body.quiz).toHaveProperty('questions');
+    expect(response.body).toHaveProperty('data');
+    expect(response.body.data).toHaveProperty('quiz_id');
+    expect(response.body.data).toHaveProperty('questions');
   });
 
-  test('GET /api/quiz/history should return empty history for new user', async () => {
+  test('GET /api/history should return user quiz history', async () => {
     const response = await request(app)
-      .get('/api/quiz/history')
+      .get('/api/history')
       .set('Authorization', `Bearer ${authToken}`)
       .expect(200);
 
