@@ -38,17 +38,25 @@ class Submission {
       } catch (e) {
         logger.error('Error parsing responses JSON:', e);
         submission.responses = [];
-      }
-      
-      try {
-        submission.detailed_results = JSON.parse(submission.detailed_results || '[]');
+      }      try {
+        // Parse the detailed results and store them in both camelCase and snake_case properties
+        const detailedResults = JSON.parse(submission.detailed_results || '[]');
+        submission.detailed_results = detailedResults;
+        submission.detailedResults = detailedResults;  // Add camelCase property for consistency
+        logger.info(`Successfully parsed ${detailedResults.length} detailed results`);
+        
+        // If we have empty detailed results, add a note in the logs
+        if (detailedResults.length === 0) {
+          logger.warn('No detailed results found in submission - this will cause missing data in API response');
+        }
       } catch (e) {
         logger.error('Error parsing detailed_results JSON:', e);
         submission.detailed_results = [];
+        submission.detailedResults = [];
       }
-      
-      try {
+        try {
         submission.suggestions = JSON.parse(submission.suggestions || '[]');
+        logger.info(`Successfully parsed ${submission.suggestions.length} suggestions`);
       } catch (e) {
         logger.error('Error parsing suggestions JSON:', e);
         submission.suggestions = [];

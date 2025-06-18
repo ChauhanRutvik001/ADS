@@ -396,8 +396,7 @@
           "event": [
             {
               "listen": "test",
-              "script": {
-                "exec": [
+              "script": {                "exec": [
                   "pm.test('Status code is 200', function() {",
                   "    pm.response.to.have.status(200);",
                   "});",
@@ -414,6 +413,31 @@
                   "    pm.expect(response.submission).to.have.property('score');",
                   "    pm.expect(response.submission).to.have.property('maxScore');",
                   "    pm.expect(response.submission).to.have.property('percentage');",
+                  "    pm.expect(response.submission).to.have.property('detailedResults');",
+                  "});",
+                  "",
+                  "pm.test('DetailedResults are returned', function() {",
+                  "    const response = pm.response.json();",
+                  "    const detailedResults = response.submission.detailedResults;",
+                  "    ",
+                  "    console.log('DetailedResults length: ' + (Array.isArray(detailedResults) ? detailedResults.length : 'not an array'));",
+                  "    ",
+                  "    pm.expect(detailedResults).to.be.an('array');",
+                  "    ",
+                  "    if (detailedResults.length > 0) {",
+                  "        console.log('Sample detailed result: ' + JSON.stringify(detailedResults[0], null, 2));",
+                  "        pm.expect(detailedResults[0]).to.have.property('questionId');",
+                  "        pm.expect(detailedResults[0]).to.have.property('correct');",
+                  "        pm.expect(detailedResults[0]).to.have.property('marks');",
+                  "    } else {",
+                  "        console.warn('No detailed results were returned');",
+                  "    }",
+                  "});",
+                  "",
+                  "pm.test('Suggestions are returned', function() {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.submission).to.have.property('suggestions').that.is.an('array');",
+                  "    console.log('Suggestions count: ' + response.submission.suggestions.length);",
                   "});",
                   "",
                   "if (pm.response.code === 200) {",
@@ -421,6 +445,8 @@
                   "    if (response.success && response.submission && response.submission.submissionId) {",
                   "        pm.collectionVariables.set('submissionId', response.submission.submissionId);",
                   "        console.log('Submission ID set to: ' + response.submission.submissionId);",
+                  "        console.log('Score: ' + response.submission.score + '/' + response.submission.maxScore);",
+                  "        console.log('Percentage: ' + response.submission.percentage + '%');",
                   "    }",
                   "}"
                 ]
@@ -479,8 +505,7 @@
                 ]
               }
             }
-          ],
-          "request": {
+          ],          "request": {
             "method": "POST",
             "header": [
               {
@@ -501,7 +526,69 @@
               "path": ["api", "quiz", "submit"]
             }
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Success flag is true\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test(\"Contains submission data\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('submission');",
+                  "    pm.expect(jsonData.submission).to.not.be.null;",
+                  "});",
+                  "",
+                  "pm.test(\"Submission has required fields\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    var submission = jsonData.submission;",
+                  "    pm.expect(submission).to.have.property('submissionId');",
+                  "    pm.expect(submission).to.have.property('score');",
+                  "    pm.expect(submission).to.have.property('maxScore');",
+                  "    pm.expect(submission).to.have.property('percentage');",
+                  "    pm.expect(submission).to.have.property('completedAt');",
+                  "});",
+                  "",
+                  "pm.test(\"Submission contains detailed results\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.submission).to.have.property('detailedResults');",
+                  "    pm.expect(jsonData.submission.detailedResults).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test(\"Detailed results have expected structure\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.submission.detailedResults && jsonData.submission.detailedResults.length > 0) {",
+                  "        var firstResult = jsonData.submission.detailedResults[0];",
+                  "        pm.expect(firstResult).to.have.property('questionId');",
+                  "        pm.expect(firstResult).to.have.property('userResponse');",
+                  "        pm.expect(firstResult).to.have.property('correctResponse');",
+                  "        pm.expect(firstResult).to.have.property('marks');",
+                  "    }",
+                  "});",
+                  "",
+                  "pm.test(\"Submission contains suggestions\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.submission).to.have.property('suggestions');",
+                  "    pm.expect(jsonData.submission.suggestions).to.be.an('array');",
+                  "});",
+                  "",
+                  "// Store the submissionId for future requests",
+                  "if (pm.response.json().submission && pm.response.json().submission.submissionId) {",
+                  "    pm.variables.set(\"submissionId\", pm.response.json().submission.submissionId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
         },
         {
           "name": "Get Quiz Hint",

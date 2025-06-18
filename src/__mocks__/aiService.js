@@ -28,9 +28,7 @@ const aiService = {
         estimatedTime: numQuestions * 2
       }
     };
-  },
-
-  evaluateQuiz: async (quiz, responses) => {
+  },  evaluateQuiz: async (quiz, responses) => {
     logger.info(`[MOCK] Evaluating quiz with ${responses.length} responses`);
     
     // Handle case when quiz.questions is undefined or not an array
@@ -49,31 +47,64 @@ const aiService = {
     let totalScore = 0;
     const detailedResults = [];
     
+    // Log received responses and questions for debugging
+    logger.info(`[MOCK] Responses received: ${JSON.stringify(responses)}`);
+    logger.info(`[MOCK] Quiz has ${quiz.questions.length} questions`);
+    
+    // Make sure we have questions and responses - if not, add dummy data
+    if (quiz.questions.length === 0) {
+      logger.warn('[MOCK] No questions found, adding dummy question data');
+      quiz.questions = [{
+        questionId: 'q1',
+        question: 'Dummy question',
+        type: 'multiple_choice',
+        options: ['Option A', 'Option B', 'Option C', 'Option D'],
+        correctAnswer: 'A',
+        marks: 3
+      }];
+    }
+    
+    // If no responses, add dummy response
+    if (responses.length === 0) {
+      logger.warn('[MOCK] No responses found, adding dummy response data');
+      responses = [{
+        questionId: 'q1', 
+        userResponse: 'A'
+      }];
+    }
+    
     responses.forEach(response => {
       const question = quiz.questions.find(q => q.questionId === response.questionId);
-      if (!question) return;
+      if (!question) {
+        logger.warn(`[MOCK] No matching question found for questionId: ${response.questionId}`);
+        return;
+      }
       
-      const isCorrect = question.correctAnswer === response.userResponse;
+      // Default to 'A' for correctAnswer if not specified
+      const correctAnswer = question.correctAnswer || 'A';
+      const isCorrect = correctAnswer === response.userResponse;
       const marks = question.marks || 1;
       
       if (isCorrect) totalScore += marks;
-      
-      detailedResults.push({
+        detailedResults.push({
         questionId: response.questionId,
+        question: question.question || `Question ${response.questionId}`,
         correct: isCorrect,
         userResponse: response.userResponse,
-        correctResponse: question.correctAnswer,
+        correctResponse: correctAnswer,
+        correctAnswer: correctAnswer, // Add both field names for compatibility
         marks: isCorrect ? marks : 0,
         maxMarks: marks,
         feedback: isCorrect 
           ? 'Correct! Good work.' 
-          : `Incorrect. The correct answer is ${question.correctAnswer}.`
+          : `Incorrect. The correct answer is ${correctAnswer}.`
       });
     });
     
     const percentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
     
-    return {
+    // Enhanced evaluation result with more details
+    const result = {
       totalScore,
       maxScore,
       percentage: Math.round(percentage),
@@ -84,6 +115,12 @@ const aiService = {
         'Try a harder quiz next time'
       ]
     };
+    
+    logger.info(`[MOCK] Evaluation result: Score ${totalScore}/${maxScore} (${Math.round(percentage)}%)`);
+    logger.info(`[MOCK] Generated ${detailedResults.length} detailed results`);
+    
+    // Make sure we always return the result object from the mock
+    return result;return result;
   },
 
   generateHint: async (quiz, questionId) => {

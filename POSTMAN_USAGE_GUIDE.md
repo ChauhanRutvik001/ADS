@@ -25,6 +25,8 @@ This document explains how to use the updated Postman collection to test the AI 
 - Run the "Submit Quiz Answers" request
 - The collection will automatically use the question IDs from the previous step
 - Default answers (all "A") will be submitted for testing purposes
+- You'll receive detailed results showing which questions were answered correctly
+- The response includes scores, detailed assessment of each answer, and learning suggestions
 
 ## Key Variables
 
@@ -76,6 +78,15 @@ If you encounter issues with the quiz submission:
 2. Verify the `dynamicResponses` variable has been populated correctly
 3. Check the quiz format in the database using the provided verification scripts
 4. Examine the application logs for detailed error information
+
+### Missing Detailed Results
+
+If you're not seeing detailed results in the submission response:
+
+1. Run the `test-quiz-submission-results.js` script to diagnose the issue
+2. Check that the questions in the quiz have proper `correctAnswer` values
+3. Verify that the server logs don't show any parsing errors for the detailed_results field
+4. Make sure your submissions contain valid questionId values that match the quiz
 
 ## Testing with Real Data
 
