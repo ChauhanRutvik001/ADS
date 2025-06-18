@@ -33,12 +33,6 @@ router.get('/recent',
   historyController.getRecentActivity
 );
 
-// Get submission details
-router.get('/:submissionId',
-  validationMiddleware.validateSubmissionId,
-  historyController.getSubmissionDetails
-);
-
 // Get user's attempted subjects
 router.get('/meta/subjects',
   historyController.getSubjects
@@ -47,6 +41,12 @@ router.get('/meta/subjects',
 // Get user's attempted grades
 router.get('/meta/grades',
   historyController.getGrades
+);
+
+// Get submission details - this must be last because it has a parameter
+router.get('/:submissionId',
+  validationMiddleware.validateSubmissionId,
+  historyController.getSubmissionDetails
 );
 
 module.exports = router;
